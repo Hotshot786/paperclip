@@ -570,6 +570,20 @@ async function handleEvent(
     `[hermes-gateway:event] run=${state.runId} event=${eventName ?? "message"} data=${stringifyForLog(redactForLog(parsed, [], 0, redactText), 8_000)}\n`,
   );
 
+  // Hermes pauses dangerous tool calls on approval.request until a human responds.
+  // This adapter has no interactive approval bridge yet. Do not leave the Paperclip
+  // run waiting for its full timeout and, critically, never approve the action here.
+  if (eventName === "approval.request") {
+    markTerminal(state, {
+      runId: state.runId,
+      status: "approval_required",
+      eventName,
+      payload: record ?? { event: eventName },
+      output: "Hermes requested a human approval.",
+    });
+    return;
+  }
+
   const delta = nonEmpty(record?.delta) ?? nonEmpty(record?.text_delta);
   if (eventName === "message.delta" && delta) {
     const sanitizedDelta = redactText(delta);
@@ -1064,6 +1078,43 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         hermesRunId: runId,
         strategy,
       },
+      sessionDisplayId: sessionKey ? redactText(sessionKey) : null,
+    };
+  }
+
+  if (outcome.eventName === "approval.request") {
+    // Stop the remote worker immediately. Paperclip currently cannot deliver a
+    // human Approve/Deny decision back to this in-flight legacy adapter run, so
+    // fail closed and preserve the request details for an operator to review.
+    const stopResponse = await stopRun({ ctx, baseUrl, headers: eventHeaders, runId, redactText });
+    const finalStatus = await fetchFinalStatus({
+      baseUrl,
+      headers: eventHeaders,
+      runId,
+      deadlineMs: STOP_GRACE_MS,
+    });
+    await ctx.onLog(
+      "stderr",
+      "[hermes-gateway] approval.request received; remote run stopped without approving the action. Review the request before retrying.\\n",
+    );
+    return {
+      exitCode: 1,
+      signal: null,
+      timedOut: false,
+      errorCode: "hermes_gateway_approval_required",
+      errorMessage:
+        "Hermes requested human approval for a tool action. This Paperclip adapter does not yet relay interactive approvals, so the remote run was stopped without approving the action. Review the approval.request event in the transcript before retrying.",
+      provider: "hermes_gateway",
+      resultJson: {
+        run_id: runId,
+        status: extractStatus(finalStatus) ?? extractStatus(stopResponse) ?? outcome.status,
+        last_event: "approval.request",
+        approval_required: true,
+        approval: redactForLog(outcome.payload ?? {}, [], 0, redactText),
+        stop_response: redactForLog(stopResponse, [], 0, redactText),
+        final_status: redactForLog(finalStatus, [], 0, redactText),
+      },
+      sessionParams: { hermesRunId: runId, strategy },
       sessionDisplayId: sessionKey ? redactText(sessionKey) : null,
     };
   }
