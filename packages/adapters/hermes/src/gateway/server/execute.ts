@@ -1095,7 +1095,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     });
     await ctx.onLog(
       "stderr",
-      "[hermes-gateway] approval.request received; remote run stopped without approving the action. Review the request before retrying.\\n",
+      "[hermes-gateway] approval.request received; remote run stopped without approving the action. Review the request before retrying.\n",
     );
     return {
       exitCode: 1,
