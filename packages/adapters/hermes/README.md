@@ -144,6 +144,18 @@ This mode does not start Hermes. It creates runs with `POST /v1/runs`, streams
 Hermes events with SSE, polls run status as a fallback, and stops timed-out runs
 with `POST /v1/runs/{run_id}/stop`.
 
+#### Tool approval requests
+
+Hermes can emit `approval.request` when a tool action is waiting for a human
+decision. The legacy `hermes_gateway` adapter does not yet bridge that
+in-flight request to Paperclip's interactive approval controls. Until that
+bridge exists, the adapter fails closed: it stops the remote run, returns
+`hermes_gateway_approval_required`, and keeps a redacted copy of the approval
+request in result metadata for operator review. It never approves the action
+automatically. Review the run transcript before retrying. This behavior avoids
+leaving a run parked until its full timeout; it is not a substitute for the
+future interactive approval bridge.
+
 ### Compatibility with the old gateway package
 
 `@paperclipai/adapter-hermes-gateway` remains as a deprecated compatibility shim
