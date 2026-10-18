@@ -709,6 +709,60 @@ describe("execute", () => {
     expect(result.errorMessage).not.toContain("paperclip:company:company-1:agent:agent-1:issue:issue-1");
   });
 
+  it("stops an approval-gated run promptly without auto-approving", async () => {
+    const approvalRequest = {
+      event: "approval.request",
+      prompt: "Approve this tool action?",
+      command: "echo safe-test",
+      choices: ["once", "deny"],
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/v1/runs")) {
+        return new Response(JSON.stringify({ run_id: "run-needs-approval", status: "started" }), { status: 202 });
+      }
+      if (url.endsWith("/events")) {
+        return new Response(
+          sseStream([
+            "event: approval.request",
+            `data: ${JSON.stringify(approvalRequest)}`,
+            "",
+          ].join("\n")),
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        );
+      }
+      if (url.endsWith("/stop")) {
+        expect(init?.method).toBe("POST");
+        return new Response(JSON.stringify({ status: "stopping" }), { status: 200 });
+      }
+      if (init?.method === "GET") {
+        return new Response(JSON.stringify({ status: "cancelled", last_event: "run.cancelled" }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ status: "running" }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await execute(makeCtx({
+      apiBaseUrl: "http://127.0.0.1:8642",
+      apiKey: "secret-key",
+      timeoutSec: 5,
+    }));
+
+    expect(result.exitCode).toBe(1);
+    expect(result.timedOut).toBe(false);
+    expect(result.errorCode).toBe("hermes_gateway_approval_required");
+    expect(result.errorMessage).toContain("without approving the action");
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/stop"))).toBe(true);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/approval"))).toBe(false);
+    expect(result.resultJson).toMatchObject({
+      run_id: "run-needs-approval",
+      status: "cancelled",
+      last_event: "approval.request",
+      approval_required: true,
+    });
+    expect(JSON.stringify(result.resultJson)).toContain("echo safe-test");
+  });
+
   it("calls stop on timeout", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
