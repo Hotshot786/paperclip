@@ -716,6 +716,7 @@ describe("execute", () => {
       command: "echo safe-test",
       choices: ["once", "deny"],
     };
+    let stopRequested = false;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.endsWith("/v1/runs")) {
@@ -733,10 +734,14 @@ describe("execute", () => {
       }
       if (url.endsWith("/stop")) {
         expect(init?.method).toBe("POST");
+        stopRequested = true;
         return new Response(JSON.stringify({ status: "stopping" }), { status: 200 });
       }
       if (init?.method === "GET") {
-        return new Response(JSON.stringify({ status: "cancelled", last_event: "run.cancelled" }), { status: 200 });
+        return new Response(JSON.stringify({
+          status: stopRequested ? "cancelled" : "running",
+          ...(stopRequested ? { last_event: "run.cancelled" } : {}),
+        }), { status: 200 });
       }
       return new Response(JSON.stringify({ status: "running" }), { status: 200 });
     });
