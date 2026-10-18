@@ -714,6 +714,7 @@ describe("execute", () => {
       event: "approval.request",
       prompt: "Approve this tool action?",
       command: "echo safe-test",
+      api_key: "approval-payload-secret",
       choices: ["once", "deny"],
     };
     let stopRequested = false;
@@ -766,6 +767,8 @@ describe("execute", () => {
       approval_required: true,
     });
     expect(JSON.stringify(result.resultJson)).toContain("echo safe-test");
+    expect(JSON.stringify(result.resultJson)).not.toContain("approval-payload-secret");
+    expect(JSON.stringify(result.resultJson)).toContain("[redacted len=");
   });
 
   it("calls stop on timeout", async () => {
